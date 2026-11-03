@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Космический Кликер</title>
+<style>
+html,body{margin:0;height:100%;background:#050510;color:#fff;font-family:Arial,sans-serif;overflow:hidden;touch-action:manipulation;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
+#spaceCanvas{position:fixed;inset:0;width:100%;height:100%;z-index:0}
+#gameUI{position:relative;z-index:10;height:100%;display:flex;flex-direction:column;align-items:center;pointer-events:none}
+#gameUI>*{pointer-events:auto}
+#score-board{text-align:center;margin-top:24px;pointer-events:none}
+#coins{font-size:44px;font-weight:bold;color:#ffd700;text-shadow:0 0 20px rgba(255,215,0,.6)}
+#per-click{font-size:14px;color:#aaa;margin-top:4px}
+#menu{display:flex;gap:8px;margin-top:10px}
+#menu button{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;border-radius:10px;padding:8px 12px;font-size:14px}
+#click-area{flex:1;display:flex;align-items:center;justify-content:center;width:100%;pointer-events:none}
+#click-btn{pointer-events:auto;width:150px;height:150px;border-radius:50%;background:linear-gradient(135deg,#1e90ff,#005cbf);border:4px solid #fff;font-size:64px;box-shadow:0 0 40px rgba(30,144,255,.8);cursor:pointer;transition:transform .1s;outline:none;padding:0}
+#click-btn:active{transform:scale(.92);box-shadow:0 0 15px rgba(30,144,255,.8)}
+#shop{width:92%;max-width:400px;max-height:36vh;overflow-y:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:16px}
+.shop-item{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.2);border-radius:12px;padding:10px 12px;display:flex;justify-content:space-between;align-items:center;backdrop-filter:blur(5px);-webkit-backdrop-filter:blur(5px)}
+.item-title{font-weight:bold;font-size:15px}
+.item-desc{font-size:12px;color:#aaa;margin-top:2px}
+.item-price{font-size:13px;color:#ffd700;margin-top:3px}
+button.buy{background:#2ed573;color:#fff;border:none;padding:9px 14px;border-radius:8px;font-weight:bold;font-size:15px}
+button.buy:disabled{background:#444;color:#888}
+.float{position:fixed;z-index:30;font-weight:bold;font-size:22px;color:#ffd700;text-shadow:0 0 8px #000;pointer-events:none;animation:fl .9s ease-out forwards}
+@keyframes fl{to{transform:translateY(-70px);opacity:0}}
+#toast{position:fixed;top:10px;left:50%;transform:translateX(-50%);z-index:40;display:flex;flex-direction:column;gap:6px;align-items:center;pointer-events:none}
+.t{background:rgba(30,30,60,.95);border:1px solid #ffd700;border-radius:10px;padding:8px 14px;font-size:14px}
+#modal{position:fixed;inset:0;z-index:50;background:rgba(0,0,10,.85);display:none;flex-direction:column;align-items:center;padding:16px;overflow-y:auto}
+#modal .box{width:100%;max-width:400px}
+#modal h2{margin:8px 0 12px}
+.row{display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,.08);border-radius:10px;padding:10px 12px;margin-bottom:8px}
+.row.done{border:1px solid #2ed573}
+.row.off{opacity:.45}
+#closeBtn{margin-top:8px;background:#444;color:#fff;border:none;border-radius:10px;padding:10px 20px;font-size:15px}
+</style>
+</head>
+<body>
+<canvas id="spaceCanvas"></canvas>
+<div id="toast"></div>
+<div id="gameUI">
+  <div id="score-board">
+    <div id="coins">0</div>
+    <div id="per-click"></div>
+  </div>
+  <div id="menu">
+    <button onclick="openModal('skins')">🎨 Скины</button>
+    <button onclick="openModal('ach')">🏆 Награды</button>
+    <button onclick="openModal('prestige')">♻️ Престиж</button>
+    <button id="sndBtn" onclick="toggleSound()">🔊</button>
+  </div>
+  <div id="click-area"><button id="click-btn" onclick="clickCoin(event)">⭐</button></div>
+  <div id="shop"></div>
+</div>
+<div id="modal"><div class="box" id="modalBox"></div></div>
+
+<script>
+// ===== ДАННЫЕ =====
+const SHOP=[
+ {id:'click',name:'Улучшение клика',desc:'+1 за клик',base:10,g:1.5},
+ {id:'auto',name:'Автокликер',desc:'+1 монета/сек',base:50,g:2},
+ {id:'station',name:'Космостанция',desc:'+10 монет/сек',base:400,g:2.2},
+ {id:'mult',name:'Множитель',desc:'×2 ко всему доходу',base:1000,g:3.5},
+ {id:'luck',name:'Удача',desc:'+5% шанс клика ×5',base:250,g:2}
+];
+const SKINS=[['⭐',0],['🚀',300],['🪐',1500],['🛸',6000],['🌙',25000]];
+const ACH=[
+ ['c100','Первые 100 кликов',s=>s.clicks>=100],
+ ['t1k','Заработано 1 000',s=>s.total>=1e3],
+ ['t100k','Заработано 100 000',s=>s.total>=1e5],
+ ['t1m','Миллионер',s=>s.total>=1e6],
+ ['u10','10 улучшений',s=>SHOP.reduce((a,i)=>a+s.lvl[i.id],0)>=10],
+ ['gold','Поймал золотую планету',s=>s.gold>=1],
+ ['gold5','Охотник: 5 золотых планет',s=>s.gold>=5],
+ ['pr','Первый престиж',s=>s.prestige>=1]
+];
+function fresh(){return{coins:0,total:0,run:0,clicks:0,gold:0,prestige:0,skin:0,skins:[0],ach:[],lvl:{click:0,auto:0,station:0,mult:0,luck:0},sound:true,last:Date.now()}}
+let S=fresh();
+try{const d=JSON.parse(localStorage.getItem('spaceClicker')||'null');if(d){S=Object.assign(fresh(),d);S.lvl=Object.assign(fresh().lvl,d.lvl)}}catch(e){}
+
+// ===== РАСЧЁТЫ =====
+const pm=()=>1+0.1*S.prestige;
+const mult=()=>Math.pow(2,S.lvl.mult)*pm();
+const perClick=()=>(1+S.lvl.click)*mult();
+const income=()=>(S.lvl.auto+S.lvl.station*10)*mult();
+const luckP=()=>Math.min(0.5,S.lvl.luck*0.05);
+const price=i=>Math.floor(i.base*Math.pow(i.g,S.lvl[i.id]));
+function fmt(n){n=Math.floor(n);if(n<1000)return''+n;const u=['K','M','B','T'];let i=-1;let v=n;while(v>=1000&&i<3){v/=1000;i++}return v.toFixed(v<10?2:v<100?1:0)+u[i]}
+function add(n){S.coins+=n;S.total+=n;S.run+=n}
+
+// ===== ЗВУК И ВИБРАЦИЯ =====
+let AC=null;
+function beep(f,d,t){if(!S.sound)return;try{AC=AC||new(window.AudioContext||window.webkitAudioContext)();const o=AC.createOscillator(),g=AC.createGain();o.type=t||'sine';o.frequency.value=f;g.gain.value=.08;o.connect(g);g.connect(AC.destination);o.start();g.gain.exponentialRampToValueAtTime(.001,AC.currentTime+d);o.stop(AC.currentTime+d)}catch(e){}}
+function vib(ms){if(S.sound&&navigator.vibrate)navigator.vibrate(ms)}
+function toggleSound(){S.sound=!S.sound;updateUI()}
+
+// ===== UI =====
+const $=id=>document.getElementById(id);
+const shopEl=$('shop');
+shopEl.innerHTML=SHOP.map(i=>`<div class="shop-item"><div><div class="item-title">${i.name} <span id="lv-${i.id}"></span></div><div class="item-desc">${i.desc}</div><div class="item-price">Цена: <span id="pr-${i.id}"></span></div></div><button class="buy" id="b-${i.id}" onclick="buy('${i.id}')">Купить</button></div>`).join('');
+
+function updateUI(){
+  $('coins').innerText=fmt(S.coins);
+  $('per-click').innerText=`за клик: ${fmt(perClick())} • доход: ${fmt(income())}/сек`+(S.prestige?` • ♻️×${pm().toFixed(1)}`:'');
+  SHOP.forEach(i=>{const p=price(i);$('pr-'+i.id).innerText=fmt(p);$('lv-'+i.id).innerText='ур.'+S.lvl[i.id];$('b-'+i.id).disabled=S.coins<p});
+  $('click-btn').innerText=SKINS[S.skin][0];
+  $('sndBtn').innerText=S.sound?'🔊':'🔇';
+  checkAch();
+}
+function toast(t){const e=document.createElement('div');e.className='t';e.innerText=t;$('toast').appendChild(e);setTimeout(()=>e.remove(),3000)}
+function floatText(txt,x,y){const e=document.createElement('div');e.className='float';e.innerText=txt;e.style.left=(x-15)+'px';e.style.top=(y-20)+'px';document.body.appendChild(e);setTimeout(()=>e.remove(),900)}
+function checkAch(){ACH.forEach(a=>{if(!S.ach.includes(a[0])&&a[2](S)){S.ach.push(a[0]);toast('🏆 '+a[1]);beep(880,.3)}})}
+
+// ===== ИГРА =====
+function clickCoin(e){
+  let v=perClick(),crit=Math.random()<luckP();
+  if(crit)v*=5;
+  add(v);S.clicks++;
+  let x=e&&e.clientX,y=e&&e.clientY;
+  if(!x){const r=$('click-btn').getBoundingClientRect();x=r.left+r.width/2;y=r.top}
+  floatText((crit?'💥 ':'+')+fmt(v),x+(Math.random()*40-20),y);
+  vib(10);beep(crit?660:420,.06);
+  updateUI();
+}
+function buy(id){
+  const i=SHOP.find(s=>s.id===id),p=price(i);
+  if(S.coins>=p){S.coins-=p;S.lvl[id]++;beep(600,.12,'triangle');vib(25);updateUI()}
+}
+setInterval(()=>{const n=income();if(n>0){add(n);updateUI()}},1000);
+
+// ===== СОХРАНЕНИЕ =====
+function save(){S.last=Date.now();try{localStorage.setItem('spaceClicker',JSON.stringify(S))}catch(e){}}
+setInterval(save,5000);
+window.addEventListener('beforeunload',save);
+document.addEventListener('visibilitychange',()=>{if(document.hidden)save()});
+
+// Офлайн-доход (50%, максимум 2 часа)
+(function(){const dt=Math.min((Date.now()-S.last)/1000,7200);const g=income()*dt*0.5;if(g>=1&&dt>30){add(g);setTimeout(()=>toast('😴 Пока вас не было: +'+fmt(g)),500)}})();
+
+// ===== ОКНА =====
+function openModal(kind){
+  let h='';
+  if(kind==='skins'){
+    h='<h2>🎨 Скины кнопки</h2>'+SKINS.map((s,i)=>{const own=S.skins.includes(i);return`<div class="row"><span style="font-size:32px">${s[0]}</span>${own?(S.skin===i?'<span>✔ Выбран</span>':`<button class="buy" onclick="skin(${i})">Выбрать</button>`):`<button class="buy" ${S.coins<s[1]?'disabled':''} onclick="skin(${i})">${fmt(s[1])}</button>`}</div>`}).join('');
+  }else if(kind==='ach'){
+    h=`<h2>🏆 Награды (${S.ach.length}/${ACH.length})</h2>`+ACH.map(a=>`<div class="row ${S.ach.includes(a[0])?'done':'off'}"><span>${a[1]}</span><span>${S.ach.includes(a[0])?'✔':'🔒'}</span></div>`).join('');
+  }else{
+    const pts=Math.floor(Math.sqrt(S.run/20000));
+    h=`<h2>♻️ Престиж</h2><div class="row"><span>Очки престижа сейчас</span><b>${S.prestige}</b></div><div class="row"><span>Бонус дохода</span><b>+${S.prestige*10}%</b></div><div class="row"><span>Получите за сброс</span><b>+${pts}</b></div><p style="font-size:13px;color:#aaa">Сброс обнуляет монеты и улучшения (скины и награды остаются). Каждое очко даёт +10% ко всему доходу. Нужно заработать за забег минимум 20 000.</p><button class="buy" style="width:100%" ${pts<1?'disabled':''} onclick="doPrestige(${pts})">Сбросить и получить +${pts}</button>`;
+  }
+  $('modalBox').innerHTML=h+'<button id="closeBtn" onclick="closeModal()">Закрыть</button>';
+  $('modal').style.display='flex';
+}
+function closeModal(){$('modal').style.display='none'}
+function skin(i){
+  if(!S.skins.includes(i)){if(S.coins<SKINS[i][1])return;S.coins-=SKINS[i][1];S.skins.push(i);beep(700,.15)}
+  S.skin=i;updateUI();openModal('skins');
+}
+function doPrestige(p){
+  if(p<1)return;
+  S.prestige+=p;S.coins=0;S.run=0;S.lvl=fresh().lvl;
+  save();updateUI();closeModal();toast('♻️ Престиж! Бонус +'+(S.prestige*10)+'%');
+}
+
+// ===== КОСМОС =====
+const canvas=$('spaceCanvas'),ctx=canvas.getContext('2d');
+function resize(){canvas.width=innerWidth;canvas.height=innerHeight}
+addEventListener('resize',resize);resize();
+
+const stars=[];
+for(let i=0;i<100;i++)stars.push({x:Math.random()*canvas.width,y:Math.random()*canvas.height,r:Math.random()*1.5+.5,s:Math.random()*.5+.1,a:Math.random()});
+function drawStars(){
+  ctx.fillStyle='white';
+  stars.forEach(s=>{
+    ctx.globalAlpha=s.a;ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,6.283);ctx.fill();
+    s.y+=s.s;s.a=Math.min(1,Math.max(.1,s.a+(Math.random()-.5)*.05));
+    if(s.y>canvas.height){s.y=0;s.x=Math.random()*canvas.width}
+  });
+  ctx.globalAlpha=1;
+}
+
+const planets=[],COL=['#ff4757','#1e90ff','#2ed573','#ffa502','#9b59b6','#e84393'];
+function createPlanet(gold){
+  const r=gold?26:Math.random()*20+10;
+  planets.push({x:Math.random()*(canvas.width-60)+30,y:-r,r,s:gold?1.1:Math.random()*.5+.2,c:gold?'#ffd700':COL[Math.floor(Math.random()*COL.length)],gold});
+}
+setInterval(()=>{if(planets.length<6)createPlanet(false)},3000);createPlanet(false);
+// Золотая планета: раз в 20–40 секунд
+(function sched(){setTimeout(()=>{createPlanet(true);toast('✨ Золотая планета! Тапни по ней');sched()},20000+Math.random()*20000)})();
+
+function drawPlanets(){
+  for(let i=planets.length-1;i>=0;i--){
+    const p=planets[i];
+    if(p.gold){ctx.shadowColor='#ffd700';ctx.shadowBlur=25}
+    ctx.fillStyle=p.c;ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,6.283);ctx.fill();
+    ctx.shadowBlur=0;
+    ctx.fillStyle='rgba(255,255,255,.3)';ctx.beginPath();ctx.arc(p.x-p.r*.3,p.y-p.r*.3,p.r*.3,0,6.283);ctx.fill();
+    p.y+=p.s*2;
+    if(p.y>canvas.height+p.r)planets.splice(i,1);
+  }
+}
+// Тап по золотой планете
+canvas.addEventListener('pointerdown',e=>{
+  for(let i=planets.length-1;i>=0;i--){
+    const p=planets[i];
+    if(p.gold&&Math.hypot(e.clientX-p.x,e.clientY-p.y)<p.r+20){
+      const b=Math.max(100,income()*30+perClick()*50);
+      add(b);S.gold++;planets.splice(i,1);
+      floatText('+'+fmt(b),e.clientX,e.clientY);beep(1000,.25,'triangle');vib(60);updateUI();break;
+    }
+  }
+});
+
+(function loop(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  drawStars();drawPlanets();
+  requestAnimationFrame(loop);
+})();
+
+updateUI();
+</script>
+</body>
+</html>
